@@ -21,13 +21,9 @@
   <script src="https://unpkg.com/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://unpkg.com/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
   
-  <!-- Cannon.js for Physics -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
-
   <script>
-    // FIX: urdf-loader UMD build expects STLLoader to be under window.STLLoader_js.STLLoader
     window.STLLoader_js = { STLLoader: THREE.STLLoader };
-    window.ColladaLoader_js = { ColladaLoader: function(){} }; // mock collada loader
+    window.ColladaLoader_js = { ColladaLoader: function(){} }; 
   </script>
   <script src="https://unpkg.com/urdf-loader@0.13.1/umd/URDFLoader.js"></script>
 </head>
@@ -39,7 +35,7 @@
     <div>
       <select id="modeSelect" style="margin-right:10px; padding:6px; background:#333; color:white; border:1px solid #555; border-radius:4px; font-weight:bold;">
         <option value="code">Animasi Sederhana</option>
-        <option value="joystick">Joystick (Fisika)</option>
+        <option value="joystick">Joystick Mode</option>
       </select>
       <button id="runBtn">▶ Run</button>
       <button id="stopBtn" class="stop" style="display:none;">⏹ Stop</button>
@@ -67,29 +63,11 @@ async function loop() {
 
 <script>
   // ==========================================
-  // PHYSICS SETUP (CANNON.JS)
-  // ==========================================
-  const world = new CANNON.World();
-  world.gravity.set(0, -9.82, 0); // Gravitasi bumi
-  world.broadphase = new CANNON.NaiveBroadphase();
-  world.solver.iterations = 10;
-  
-  // Lantai (Fisika)
-  const groundShape = new CANNON.Plane();
-  const groundBody = new CANNON.Body({ mass: 0 }); // Mass 0 = Statis
-  groundBody.addShape(groundShape);
-  groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
-  world.addBody(groundBody);
-
-  // Array untuk menyimpan sinkronisasi bentuk (mesh -> body)
-  const physicsSync = [];
-
-  // ==========================================
   // THREE.JS & URDF SETUP
   // ==========================================
   const viewerEl = document.getElementById('viewer');
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x263238); // Dark blueish gray
+  scene.background = new THREE.Color(0x263238);
 
   const camera = new THREE.PerspectiveCamera(45, viewerEl.clientWidth / viewerEl.clientHeight, 0.1, 100);
   camera.position.set(0.6, 0.4, 0.6);
@@ -103,14 +81,12 @@ async function loop() {
   controls.target.set(0, 0.1, -0.1);
   controls.update();
 
-  // Lights
   const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
   dirLight.position.set(5, 10, 5);
   dirLight.castShadow = true;
   scene.add(dirLight);
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-  // Grid / Floor (Visual)
   const grid = new THREE.GridHelper(5, 50, 0x888888, 0x444444);
   scene.add(grid);
 
@@ -125,34 +101,11 @@ async function loop() {
   loader.load('Arm/Arm/Arm_description/urdf/Arm.xacro', result => {
     robot = result;
     window.robot = robot;
-    
-    // Rotasi standar ROS
     robot.rotation.x = -Math.PI / 2; 
     
-    // Bikin hitboxes
     robot.traverse(c => {
       c.castShadow = true;
       c.receiveShadow = true;
-      
-      // Jika ini adalah jaring visual (Mesh), buatkan Kinematic Bounding Box
-      if (c.isMesh && c.geometry) {
-        c.geometry.computeBoundingBox();
-        const bbox = c.geometry.boundingBox;
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-        const center = new THREE.Vector3();
-        bbox.getCenter(center);
-        
-        // Buat box Cannon
-        const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
-        const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
-        
-        // Offset bentuk karena bounding box Three.js diukur dari lokal origin
-        body.addShape(shape, new CANNON.Vec3(center.x, center.y, center.z));
-        world.addBody(body);
-        
-        physicsSync.push({ mesh: c, body: body });
-      }
     });
     scene.add(robot);
     
@@ -161,70 +114,11 @@ async function loop() {
     if (robot.joints['Revolute 2']) robot.joints['Revolute 2'].setJointValue(Math.PI/2);
     if (robot.joints['Revolute 3']) robot.joints['Revolute 3'].setJointValue(Math.PI/2);
 
-    console.log("URDF Loaded with Physics!");
+    console.log("URDF Loaded!");
   });
 
-  // ==========================================
-  // OBJECT INTERAKTIF (KOTAK DINAMIS)
-  // ==========================================
-  // Tambahkan kotak yang bisa didorong oleh robot
-  const boxGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
-  const boxMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
-  const boxMesh = new THREE.Mesh(boxGeo, boxMat);
-  boxMesh.castShadow = true;
-  scene.add(boxMesh);
-  
-  const boxShape = new CANNON.Box(new CANNON.Vec3(0.025, 0.025, 0.025));
-  const boxBody = new CANNON.Body({ mass: 1.0 }); // mass > 0 = dinamis
-  boxBody.addShape(boxShape);
-  boxBody.position.set(0.15, 0.2, 0.0); // Taruh di atas udara biar jatuh
-  world.addBody(boxBody);
-
-  // Bola tambahan
-  const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
-  const sphereMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
-  const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
-  sphereMesh.castShadow = true;
-  scene.add(sphereMesh);
-
-  const sphereShape = new CANNON.Sphere(0.03);
-  const sphereBody = new CANNON.Body({ mass: 0.5 });
-  sphereBody.addShape(sphereShape);
-  sphereBody.position.set(0.15, 0.3, 0.1);
-  world.addBody(sphereBody);
-
-
-  // ==========================================
-  // RENDER & PHYSICS LOOP
-  // ==========================================
-  const timeStep = 1 / 60;
-  
   function animate() {
     requestAnimationFrame(animate);
-    
-    // 1. Jalankan fisika
-    world.step(timeStep);
-    
-    // 2. Sinkronkan posisi Robot -> Hitbox Kinematik
-    const globalPos = new THREE.Vector3();
-    const globalQuat = new THREE.Quaternion();
-    
-    for (let i = 0; i < physicsSync.length; i++) {
-      const p = physicsSync[i];
-      p.mesh.getWorldPosition(globalPos);
-      p.mesh.getWorldQuaternion(globalQuat);
-      
-      p.body.position.copy(globalPos);
-      p.body.quaternion.copy(globalQuat);
-    }
-    
-    // 3. Sinkronkan Objek Fisika -> Tampilan 3D (Kotak & Bola)
-    boxMesh.position.copy(boxBody.position);
-    boxMesh.quaternion.copy(boxBody.quaternion);
-
-    sphereMesh.position.copy(sphereBody.position);
-    sphereMesh.quaternion.copy(sphereBody.quaternion);
-
     renderer.render(scene, camera);
   }
   animate();
@@ -305,7 +199,6 @@ async function loop() {
         }
       };
 
-      // Buat fungsi dengan argumen khusus
       const runFunc = new Function('robot', 'joystick', 'delay', '_runState', 'currentRunId', executorCode);
       await runFunc(robot, virtualJoystick, delay, _globalRunState, currentRunId);
     } catch (e) {
@@ -347,7 +240,7 @@ async function loop() {
   await delay(1000);
 }`;
 
-  const codeTemplateJoystick = `// Gunakan Joystick Anda untuk Mendorong Benda Fisika!
+  const codeTemplateJoystick = `// Gunakan Joystick Anda!
 let posBase = Math.PI / 2;
 let posBahu = Math.PI / 2;
 let posSiku = Math.PI / 2;
