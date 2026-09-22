@@ -34,6 +34,10 @@
   <div id="header">
     <span id="title-desc">Arduino C++ Editor</span>
     <div>
+      <select id="modeSelect" style="margin-right:10px; padding:6px; background:#333; color:white; border:1px solid #555; border-radius:4px; font-weight:bold;">
+        <option value="code">C++ Editor</option>
+        <option value="joystick">Joystick / Gamepad</option>
+      </select>
       <button id="runBtn">▶ Run</button>
       <button id="stopBtn" class="stop" style="display:none;">⏹ Stop</button>
     </div>
@@ -100,6 +104,19 @@ void loop() {
   delay(1000);
 }
   </textarea>
+  <div id="joystick-panel" style="display:none; flex:1; padding:20px; color:#d4d4d4; font-family:sans-serif;">
+    <h2 style="margin-top:0;">🎮 Joystick Mode</h2>
+    <p>Sambungkan Gamepad (Xbox/PlayStation/Generic) ke komputer Anda lalu <b>tekan salah satu tombol</b> agar terdeteksi oleh browser.</p>
+    <div id="joystick-status" style="padding:10px; background:#444; border-radius:5px; color:yellow; margin-bottom:20px; font-weight:bold;">Status: Terputus</div>
+    <div style="background:#252526; padding:15px; border-radius:5px;">
+      <h4 style="margin-top:0;">🕹️ Kontrol:</h4>
+      <ul style="line-height: 1.8; margin-bottom:0;">
+        <li><b>Analog Kiri (Kiri/Kanan):</b> Putar Base</li>
+        <li><b>Analog Kiri (Atas/Bawah):</b> Angkat Lengan Bahu</li>
+        <li><b>Analog Kanan (Atas/Bawah):</b> Angkat Lengan Siku</li>
+      </ul>
+    </div>
+  </div>
 </div>
 
 <div id="viewer"></div>
@@ -162,6 +179,7 @@ void loop() {
 
   function animate() {
     requestAnimationFrame(animate);
+    if(typeof updateJoystick === 'function') updateJoystick();
     renderer.render(scene, camera);
   }
   animate();
@@ -281,6 +299,75 @@ void loop() {
   }
 
   document.getElementById('runBtn').addEventListener('click', runCode);
+
+  // ==========================================
+  // JOYSTICK / GAMEPAD API LOGIC
+  // ==========================================
+  const modeSelect = document.getElementById('modeSelect');
+  const codeArea = document.getElementById('code');
+  const joystickPanel = document.getElementById('joystick-panel');
+  const runBtn = document.getElementById('runBtn');
+  
+  modeSelect.addEventListener('change', (e) => {
+    if(e.target.value === 'joystick') {
+      codeArea.style.display = 'none';
+      runBtn.style.display = 'none';
+      joystickPanel.style.display = 'block';
+      stopCode(); // Hentikan C++ jika sedang jalan
+    } else {
+      codeArea.style.display = 'block';
+      runBtn.style.display = 'inline-block';
+      joystickPanel.style.display = 'none';
+    }
+  });
+
+  // Nilai pulse saat ini (default di tengah = 375)
+  let currentPulses = { 0: 375, 1: 375, 2: 375 };
+  
+  function updateJoystick() {
+    if(modeSelect.value !== 'joystick') return;
+    
+    // Ambil semua gamepad yang terdeteksi browser
+    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let pad = null;
+    for(let i = 0; i < gamepads.length; i++) {
+      if(gamepads[i]) { pad = gamepads[i]; break; }
+    }
+    
+    const statusEl = document.getElementById('joystick-status');
+    if(pad) {
+      statusEl.textContent = `Status: Tersambung (${pad.id})`;
+      statusEl.style.color = '#00ff00';
+      
+      const speed = 2.0; // Kecepatan pergerakan servo dari joystick
+      const deadzone = 0.1; // Abaikan sentuhan sangat halus (drift)
+      
+      // Axis 0 = Kiri/Kanan (Analog Kiri) -> Channel 0 (Base)
+      if(Math.abs(pad.axes[0]) > deadzone) {
+        currentPulses[0] += pad.axes[0] * speed;
+      }
+      
+      // Axis 1 = Atas/Bawah (Analog Kiri) -> Channel 1 (Bahu)
+      // Biasanya Atas bernilai negatif, Bawah positif
+      if(Math.abs(pad.axes[1]) > deadzone) {
+        currentPulses[1] += pad.axes[1] * speed;
+      }
+      
+      // Axis 3 = Atas/Bawah (Analog Kanan) -> Channel 2 (Siku)
+      if(Math.abs(pad.axes[3]) > deadzone) {
+        currentPulses[2] += pad.axes[3] * speed;
+      }
+      
+      // Batasi nilai PWM antara 150 (min) dan 600 (max) lalu terapkan
+      for(let ch = 0; ch <= 2; ch++) {
+        currentPulses[ch] = Math.max(150, Math.min(600, currentPulses[ch]));
+        pwm.setPWM(ch, 0, currentPulses[ch]);
+      }
+    } else {
+      statusEl.textContent = 'Status: Terputus (Tekan tombol apa saja di Gamepad Anda agar terdeteksi)';
+      statusEl.style.color = 'yellow';
+    }
+  }
 </script>
 </body>
 </html>
