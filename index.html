@@ -325,7 +325,8 @@ void loop() {
   let currentPulses = { 0: 375, 1: 375, 2: 375 };
   
   function updateJoystick() {
-    if(modeSelect.value !== 'joystick') return;
+    const ms = document.getElementById('modeSelect');
+    if(!ms || ms.value !== 'joystick') return;
     
     // Ambil semua gamepad yang terdeteksi browser
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -335,6 +336,8 @@ void loop() {
     }
     
     const statusEl = document.getElementById('joystick-status');
+    if(!statusEl) return;
+
     if(pad) {
       statusEl.textContent = `Status: Tersambung (${pad.id})`;
       statusEl.style.color = '#00ff00';
