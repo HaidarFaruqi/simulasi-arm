@@ -240,34 +240,79 @@ async function loop() {
   await delay(1000);
 }`;
 
-  const codeTemplateJoystick = `// Gunakan Joystick Anda!
-let posBase = Math.PI / 2;
-let posBahu = Math.PI / 2;
-let posSiku = Math.PI / 2;
+  const codeTemplateJoystick = `// 1. Konstanta Panjang Lengan (dari URDF)
+// Jarak Joint 1 ke Joint 2 = sqrt(0.11486^2 + 0.021936^2)
+const L1 = 0.1169; 
+// Jarak Joint 2 ke Joint 3 = sqrt(0.16486^2 + 0.021936^2)
+const L2 = 0.1663; 
+
+// 2. Posisi Target Awal (Y dan Z) relatif terhadap Pangkal
+// Kita mulai dari posisi lengan lurus ke depan
+let targetY = L1 + L2; 
+let targetZ = 0.0;
+
+// Sudut capit (L3) dikontrol manual
+let sudutL3 = Math.PI / 2;
 
 async function loop() {
   if (joystick.connected()) {
-    let axisX = joystick.getAxis(0);
-    let axisY = joystick.getAxis(1);
-    let axisSiku = joystick.getAxis(3);
+    // === BACA JOYSTICK ===
+    // Joystick Kiri (Analog 1) -> Menggerakkan Target Y dan Z (L1 & L2)
+    let joy1_X = joystick.getAxis(0); // Kiri/Kanan -> Maju/Mundur (Target Y)
+    let joy1_Y = joystick.getAxis(1); // Atas/Bawah -> Naik/Turun (Target Z)
     
+    // Joystick Kanan (Analog 2) -> Menggerakkan L3 (Capit/Ujung)
+    let joy2_Y = joystick.getAxis(3);
+
     let deadzone = 0.1;
-    let speed = 0.05; // radian per frame
+    let speedTarget = 0.005; // Kecepatan gerak ujung lengan
+    let speedSiku   = 0.05;  // Kecepatan putar engsel L3
+
+    // Update Target Y & Z berdasarkan Joystick 1
+    if (Math.abs(joy1_X) > deadzone) targetY += joy1_X * speedTarget;
+    // Biasanya analog Y terbalik (atas = negatif), kita sesuaikan
+    if (Math.abs(joy1_Y) > deadzone) targetZ -= joy1_Y * speedTarget;
+
+    // Update Sudut L3 berdasarkan Joystick 2
+    if (Math.abs(joy2_Y) > deadzone) sudutL3 += joy2_Y * speedSiku;
+
+    // === INVERSE KINEMATICS (L1 & L2) ===
+    // Jarak dari pangkal ke target
+    let R = Math.sqrt(targetY*targetY + targetZ*targetZ);
     
-    if (Math.abs(axisX) > deadzone) posBase += axisX * speed;
-    if (Math.abs(axisY) > deadzone) posBahu += axisY * speed;
-    if (Math.abs(axisSiku) > deadzone) posSiku += axisSiku * speed;
+    // Batasi jangkauan maksimal agar matematika tidak error (NaN)
+    let maxR = L1 + L2 - 0.001;
+    if (R > maxR) {
+      targetY = (targetY / R) * maxR;
+      targetZ = (targetZ / R) * maxR;
+      R = maxR;
+    }
+
+    // Hukum Cosinus untuk Sudut L2 (Siku)
+    let cosQ2 = (R*R - L1*L1 - L2*L2) / (2 * L1 * L2);
+    let q2 = Math.acos(cosQ2); // Sudut engsel ke-2
+
+    // Hukum Cosinus & Atan2 untuk Sudut L1 (Bahu)
+    let alpha = Math.atan2(targetZ, targetY);
+    let beta = Math.atan2(L2 * Math.sin(q2), L1 + L2 * Math.cos(q2));
+    let q1 = alpha - beta; // Sudut engsel ke-1
+
+    // === TERAPKAN KE ROBOT ===
+    // Karena arah sumbu X di URDF Anda bisa terbalik, 
+    // Anda bisa menambah/mengurangi Math.PI atau memberikan minus (-) jika gerakannya terbalik.
     
-    // Batasi sudut (0 - 180 derajat)
-    posBase = Math.max(0, Math.min(Math.PI, posBase));
-    posBahu = Math.max(0, Math.min(Math.PI, posBahu));
-    posSiku = Math.max(0, Math.min(Math.PI, posSiku));
-    
-    robot.joints['Revolute 1'].setJointValue(posBase);
-    robot.joints['Revolute 2'].setJointValue(posBahu);
-    robot.joints['Revolute 3'].setJointValue(posSiku);
+    // Batasi sudut L3 (0 - 180 derajat)
+    sudutL3 = Math.max(0, Math.min(Math.PI, sudutL3));
+
+    // Kirim rotasi ke 3 sendi
+    robot.joints['Revolute 1'].setJointValue(q1);
+    robot.joints['Revolute 2'].setJointValue(q2);
+    robot.joints['Revolute 3'].setJointValue(sudutL3);
     
     await delay(20);
+  } else {
+    // Tunggu jika belum tersambung
+    await delay(500);
   }
 }`;
 
