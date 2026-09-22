@@ -104,19 +104,6 @@ void loop() {
   delay(1000);
 }
   </textarea>
-  <div id="joystick-panel" style="display:none; flex:1; padding:20px; color:#d4d4d4; font-family:sans-serif;">
-    <h2 style="margin-top:0;">🎮 Joystick Mode</h2>
-    <p>Sambungkan Gamepad (Xbox/PlayStation/Generic) ke komputer Anda lalu <b>tekan salah satu tombol</b> agar terdeteksi oleh browser.</p>
-    <div id="joystick-status" style="padding:10px; background:#444; border-radius:5px; color:yellow; margin-bottom:20px; font-weight:bold;">Status: Terputus</div>
-    <div style="background:#252526; padding:15px; border-radius:5px;">
-      <h4 style="margin-top:0;">🕹️ Kontrol:</h4>
-      <ul style="line-height: 1.8; margin-bottom:0;">
-        <li><b>Analog Kiri (Kiri/Kanan):</b> Putar Base</li>
-        <li><b>Analog Kiri (Atas/Bawah):</b> Angkat Lengan Bahu</li>
-        <li><b>Analog Kanan (Atas/Bawah):</b> Angkat Lengan Siku</li>
-      </ul>
-    </div>
-  </div>
 </div>
 
 <div id="viewer"></div>
@@ -201,10 +188,10 @@ void loop() {
     2: 'Revolute 3'
   };
 
-  // Konversi pulse (150-600) ke radian (-90 s/d +90 derajat)
+  // Konversi pulse (150-600) ke radian (0 s/d 180 derajat)
   function pulseToRad(pulse) {
     const pMin = 150, pMax = 600;
-    const radMin = -Math.PI / 2, radMax = Math.PI / 2;
+    const radMin = 0, radMax = Math.PI; // 0 hingga 180 derajat
     // Batasi nilai
     pulse = Math.max(pMin, Math.min(pulse, pMax));
     return radMin + (pulse - pMin) * (radMax - radMin) / (pMax - pMin);
@@ -289,8 +276,24 @@ void loop() {
     `;
 
     try {
-      const runFunc = new Function('pwm', '_delay', '_runState', 'currentRunId', executorCode);
-      await runFunc(pwm, _delay, _globalRunState, currentRunId);
+      // API Joystick Virtual untuk C++
+      const virtualJoystick = {
+        connected: function() {
+          const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for(let i=0; i<pads.length; i++) if(pads[i]) return true;
+          return false;
+        },
+        getAxis: function(index) {
+          const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for(let i=0; i<pads.length; i++) {
+            if(pads[i] && pads[i].axes.length > index) return pads[i].axes[index];
+          }
+          return 0.0;
+        }
+      };
+
+      const runFunc = new Function('pwm', 'joystick', '_delay', '_runState', 'currentRunId', executorCode);
+      await runFunc(pwm, virtualJoystick, _delay, _globalRunState, currentRunId);
     } catch (e) {
       console.error("Transpiler Error:", e);
       alert("Error struktural kode: \n" + e.message);
@@ -301,76 +304,99 @@ void loop() {
   document.getElementById('runBtn').addEventListener('click', runCode);
 
   // ==========================================
-  // JOYSTICK / GAMEPAD API LOGIC
+  // CODE TEMPLATES
   // ==========================================
   const modeSelect = document.getElementById('modeSelect');
   const codeArea = document.getElementById('code');
-  const joystickPanel = document.getElementById('joystick-panel');
-  const runBtn = document.getElementById('runBtn');
   
+  const codeTemplateSweep = `void setup() {
+  // Uji Coba Semua Sendi (Termasuk Base)
+}
+
+void loop() {
+  // Kembali ke posisi tengah (Tegak lurus)
+  pwm.setPWM(0, 0, 375); 
+  pwm.setPWM(1, 0, 375); 
+  pwm.setPWM(2, 0, 375); 
+  delay(1000);
+
+  // 1. Menggerakkan Servo Base (Channel 0)
+  for(int p = 375; p <= 500; p += 2) {
+    pwm.setPWM(0, 0, p); delay(15);
+  }
+  for(int p = 500; p >= 250; p -= 2) {
+    pwm.setPWM(0, 0, p); delay(15);
+  }
+  for(int p = 250; p <= 375; p += 2) {
+    pwm.setPWM(0, 0, p); delay(15);
+  }
+  delay(1000);
+}`;
+
+  const codeTemplateJoystick = `// Variabel global untuk menyimpan posisi servo saat ini
+float posBase = 375;
+float posBahu = 375;
+float posSiku = 375;
+
+void setup() {
+  // Pastikan joystick/gamepad sudah terhubung dan
+  // Anda telah menekan salah satu tombolnya!
+}
+
+void loop() {
+  if (joystick.connected()) {
+    // Ambil nilai pergerakan analog (dari -1.0 sampai 1.0)
+    float analogKiriX = joystick.getAxis(0); // Kiri/Kanan
+    float analogKiriY = joystick.getAxis(1); // Atas/Bawah
+    float analogKananY = joystick.getAxis(3); // Atas/Bawah Siku
+
+    float deadzone = 0.1; // Abaikan sentuhan halus (drift)
+    float speed = 2.5;
+
+    // Gerakkan Base
+    if (analogKiriX > deadzone || analogKiriX < -deadzone) {
+      posBase += analogKiriX * speed;
+    }
+    
+    // Gerakkan Bahu
+    if (analogKiriY > deadzone || analogKiriY < -deadzone) {
+      posBahu += analogKiriY * speed;
+    }
+    
+    // Gerakkan Siku
+    if (analogKananY > deadzone || analogKananY < -deadzone) {
+      posSiku += analogKananY * speed;
+    }
+
+    // Batasi nilai agar tidak merusak servo (150 s/d 600)
+    posBase = max(150, min(posBase, 600));
+    posBahu = max(150, min(posBahu, 600));
+    posSiku = max(150, min(posSiku, 600));
+
+    // Kirim sinyal PWM
+    pwm.setPWM(0, 0, posBase);
+    pwm.setPWM(1, 0, posBahu);
+    pwm.setPWM(2, 0, posSiku);
+    
+    delay(20); // Jeda singkat agar tidak terlalu cepat
+  } else {
+    // Tunggu koneksi
+    delay(500);
+  }
+}`;
+
   modeSelect.addEventListener('change', (e) => {
+    stopCode(); // Hentikan kode lama
     if(e.target.value === 'joystick') {
-      codeArea.style.display = 'none';
-      runBtn.style.display = 'none';
-      joystickPanel.style.display = 'block';
-      stopCode(); // Hentikan C++ jika sedang jalan
+      codeArea.value = codeTemplateJoystick;
     } else {
-      codeArea.style.display = 'block';
-      runBtn.style.display = 'inline-block';
-      joystickPanel.style.display = 'none';
+      codeArea.value = codeTemplateSweep;
     }
   });
 
-  // Nilai pulse saat ini (default di tengah = 375)
-  let currentPulses = { 0: 375, 1: 375, 2: 375 };
-  
-  function updateJoystick() {
-    const ms = document.getElementById('modeSelect');
-    if(!ms || ms.value !== 'joystick') return;
-    
-    // Ambil semua gamepad yang terdeteksi browser
-    const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
-    let pad = null;
-    for(let i = 0; i < gamepads.length; i++) {
-      if(gamepads[i]) { pad = gamepads[i]; break; }
-    }
-    
-    const statusEl = document.getElementById('joystick-status');
-    if(!statusEl) return;
-
-    if(pad) {
-      statusEl.textContent = `Status: Tersambung (${pad.id})`;
-      statusEl.style.color = '#00ff00';
-      
-      const speed = 2.0; // Kecepatan pergerakan servo dari joystick
-      const deadzone = 0.1; // Abaikan sentuhan sangat halus (drift)
-      
-      // Axis 0 = Kiri/Kanan (Analog Kiri) -> Channel 0 (Base)
-      if(Math.abs(pad.axes[0]) > deadzone) {
-        currentPulses[0] += pad.axes[0] * speed;
-      }
-      
-      // Axis 1 = Atas/Bawah (Analog Kiri) -> Channel 1 (Bahu)
-      // Biasanya Atas bernilai negatif, Bawah positif
-      if(Math.abs(pad.axes[1]) > deadzone) {
-        currentPulses[1] += pad.axes[1] * speed;
-      }
-      
-      // Axis 3 = Atas/Bawah (Analog Kanan) -> Channel 2 (Siku)
-      if(Math.abs(pad.axes[3]) > deadzone) {
-        currentPulses[2] += pad.axes[3] * speed;
-      }
-      
-      // Batasi nilai PWM antara 150 (min) dan 600 (max) lalu terapkan
-      for(let ch = 0; ch <= 2; ch++) {
-        currentPulses[ch] = Math.max(150, Math.min(600, currentPulses[ch]));
-        pwm.setPWM(ch, 0, currentPulses[ch]);
-      }
-    } else {
-      statusEl.textContent = 'Status: Terputus (Tekan tombol apa saja di Gamepad Anda agar terdeteksi)';
-      statusEl.style.color = 'yellow';
-    }
-  }
+  // Polyfill untuk max/min di JS (karena user pakai max/min dari C++)
+  window.max = Math.max;
+  window.min = Math.min;
 </script>
 </body>
 </html>
