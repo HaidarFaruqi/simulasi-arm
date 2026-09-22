@@ -271,7 +271,7 @@ async function loop() {
             }
           }
         } catch (err) {
-          alert("Error eksekusi JavaScript:\n" + err.message);
+          alert("Error eksekusi JavaScript: " + err.message);
           console.error(err);
         } finally {
           if (currentRunId === _runState.runId) {
@@ -310,7 +310,7 @@ async function loop() {
       await runFunc(robot, virtualJoystick, delay, _globalRunState, currentRunId);
     } catch (e) {
       console.error("Executor Error:", e);
-      alert("Error struktural kode: \n" + e.message);
+      alert("Error struktural kode: " + e.message);
       stopCode();
     }
   }
