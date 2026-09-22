@@ -16,11 +16,14 @@
     button.stop:hover { background: #992600; }
   </style>
   
-  <!-- Three.js and dependencies using ES Modules -->
-  <!-- Three.js and dependencies using global scripts -->
+  <!-- Three.js -->
   <script src="https://unpkg.com/three@0.147.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://unpkg.com/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
+  
+  <!-- Cannon.js for Physics -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+
   <script>
     // FIX: urdf-loader UMD build expects STLLoader to be under window.STLLoader_js.STLLoader
     window.STLLoader_js = { STLLoader: THREE.STLLoader };
@@ -32,76 +35,30 @@
 
 <div id="editor-container">
   <div id="header">
-    <span id="title-desc">Arduino C++ Editor</span>
+    <span id="title-desc">JavaScript Editor</span>
     <div>
       <select id="modeSelect" style="margin-right:10px; padding:6px; background:#333; color:white; border:1px solid #555; border-radius:4px; font-weight:bold;">
-        <option value="code">C++ Editor</option>
-        <option value="joystick">Joystick / Gamepad</option>
+        <option value="code">Animasi Sederhana</option>
+        <option value="joystick">Joystick (Fisika)</option>
       </select>
       <button id="runBtn">▶ Run</button>
       <button id="stopBtn" class="stop" style="display:none;">⏹ Stop</button>
     </div>
   </div>
   <textarea id="code" spellcheck="false">
-void setup() {
-  // Uji Coba Semua Sendi (Termasuk Base)
-}
+// Tulis JavaScript murni Anda di sini!
+// Tersedia fungsi delay(ms), joystick, dan objek robot.
 
-void loop() {
-  // Channel 0 = Revolute 1 (Base/Pangkal)
-  // Channel 1 = Revolute 2 (Lengan Tengah)
-  // Channel 2 = Revolute 3 (Ujung/Capit)
-
-  // Kembali ke posisi tengah (Tegak lurus)
-  pwm.setPWM(0, 0, 375); 
-  pwm.setPWM(1, 0, 375); 
-  pwm.setPWM(2, 0, 375); 
-  delay(1000);
-
-  // 1. Menggerakkan Servo Base (Channel 0)
-  for(int p = 375; p <= 500; p += 2) {
-    pwm.setPWM(0, 0, p);
-    delay(15);
-  }
-  for(int p = 500; p >= 250; p -= 2) {
-    pwm.setPWM(0, 0, p);
-    delay(15);
-  }
-  for(int p = 250; p <= 375; p += 2) {
-    pwm.setPWM(0, 0, p);
-    delay(15);
-  }
-  delay(500);
-
-  // 2. Menggerakkan Servo Lengan Tengah (Channel 1)
-  for(int p = 375; p <= 500; p += 2) {
-    pwm.setPWM(1, 0, p);
-    delay(15);
-  }
-  for(int p = 500; p >= 250; p -= 2) {
-    pwm.setPWM(1, 0, p);
-    delay(15);
-  }
-  for(int p = 250; p <= 375; p += 2) {
-    pwm.setPWM(1, 0, p);
-    delay(15);
-  }
-  delay(500);
-
-  // 3. Menggerakkan Servo Ujung (Channel 2)
-  for(int p = 375; p <= 500; p += 2) {
-    pwm.setPWM(2, 0, p);
-    delay(15);
-  }
-  for(int p = 500; p >= 250; p -= 2) {
-    pwm.setPWM(2, 0, p);
-    delay(15);
-  }
-  for(int p = 250; p <= 375; p += 2) {
-    pwm.setPWM(2, 0, p);
-    delay(15);
-  }
-  delay(1000);
+async function loop() {
+  // Putar dasar (Base) ke sudut 90 derajat (Math.PI/2)
+  robot.joints['Revolute 1'].setJointValue(Math.PI / 2);
+  
+  // Tunggu 1 detik
+  await delay(1000);
+  
+  // Putar kembali ke 0
+  robot.joints['Revolute 1'].setJointValue(0);
+  await delay(1000);
 }
   </textarea>
 </div>
@@ -109,6 +66,24 @@ void loop() {
 <div id="viewer"></div>
 
 <script>
+  // ==========================================
+  // PHYSICS SETUP (CANNON.JS)
+  // ==========================================
+  const world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0); // Gravitasi bumi
+  world.broadphase = new CANNON.NaiveBroadphase();
+  world.solver.iterations = 10;
+  
+  // Lantai (Fisika)
+  const groundShape = new CANNON.Plane();
+  const groundBody = new CANNON.Body({ mass: 0 }); // Mass 0 = Statis
+  groundBody.addShape(groundShape);
+  groundBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), -Math.PI / 2);
+  world.addBody(groundBody);
+
+  // Array untuk menyimpan sinkronisasi bentuk (mesh -> body)
+  const physicsSync = [];
+
   // ==========================================
   // THREE.JS & URDF SETUP
   // ==========================================
@@ -135,7 +110,7 @@ void loop() {
   scene.add(dirLight);
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 
-  // Grid / Floor
+  // Grid / Floor (Visual)
   const grid = new THREE.GridHelper(5, 50, 0x888888, 0x444444);
   scene.add(grid);
 
@@ -143,30 +118,113 @@ void loop() {
   const manager = new THREE.LoadingManager();
   const loader = new URDFLoader(manager);
   
-  // Konfigurasi paket ROS
   loader.packages = {
     'Arm_description': './Arm/Arm/Arm_description/'
   };
   
-  // Memuat file URDF/XACRO asli Anda
   loader.load('Arm/Arm/Arm_description/urdf/Arm.xacro', result => {
     robot = result;
-    window.robot = robot; // Expose for debugging
-    // Rotasi agar sumbu Z menghadap ke atas (standar ROS)
+    window.robot = robot;
+    
+    // Rotasi standar ROS
     robot.rotation.x = -Math.PI / 2; 
     
+    // Bikin hitboxes
     robot.traverse(c => {
       c.castShadow = true;
       c.receiveShadow = true;
+      
+      // Jika ini adalah jaring visual (Mesh), buatkan Kinematic Bounding Box
+      if (c.isMesh && c.geometry) {
+        c.geometry.computeBoundingBox();
+        const bbox = c.geometry.boundingBox;
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+        
+        // Buat box Cannon
+        const shape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
+        const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC });
+        
+        // Offset bentuk karena bounding box Three.js diukur dari lokal origin
+        body.addShape(shape, new CANNON.Vec3(center.x, center.y, center.z));
+        world.addBody(body);
+        
+        physicsSync.push({ mesh: c, body: body });
+      }
     });
     scene.add(robot);
     
-    console.log("URDF Loaded! Available Joints:", Object.keys(robot.joints));
+    // Set posisi awal tegak 90 derajat
+    if (robot.joints['Revolute 1']) robot.joints['Revolute 1'].setJointValue(Math.PI/2);
+    if (robot.joints['Revolute 2']) robot.joints['Revolute 2'].setJointValue(Math.PI/2);
+    if (robot.joints['Revolute 3']) robot.joints['Revolute 3'].setJointValue(Math.PI/2);
+
+    console.log("URDF Loaded with Physics!");
   });
 
+  // ==========================================
+  // OBJECT INTERAKTIF (KOTAK DINAMIS)
+  // ==========================================
+  // Tambahkan kotak yang bisa didorong oleh robot
+  const boxGeo = new THREE.BoxGeometry(0.05, 0.05, 0.05);
+  const boxMat = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+  boxMesh.castShadow = true;
+  scene.add(boxMesh);
+  
+  const boxShape = new CANNON.Box(new CANNON.Vec3(0.025, 0.025, 0.025));
+  const boxBody = new CANNON.Body({ mass: 1.0 }); // mass > 0 = dinamis
+  boxBody.addShape(boxShape);
+  boxBody.position.set(0.15, 0.2, 0.0); // Taruh di atas udara biar jatuh
+  world.addBody(boxBody);
+
+  // Bola tambahan
+  const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
+  const sphereMat = new THREE.MeshStandardMaterial({ color: 0xffff00 });
+  const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+  sphereMesh.castShadow = true;
+  scene.add(sphereMesh);
+
+  const sphereShape = new CANNON.Sphere(0.03);
+  const sphereBody = new CANNON.Body({ mass: 0.5 });
+  sphereBody.addShape(sphereShape);
+  sphereBody.position.set(0.15, 0.3, 0.1);
+  world.addBody(sphereBody);
+
+
+  // ==========================================
+  // RENDER & PHYSICS LOOP
+  // ==========================================
+  const timeStep = 1 / 60;
+  
   function animate() {
     requestAnimationFrame(animate);
-    if(typeof updateJoystick === 'function') updateJoystick();
+    
+    // 1. Jalankan fisika
+    world.step(timeStep);
+    
+    // 2. Sinkronkan posisi Robot -> Hitbox Kinematik
+    const globalPos = new THREE.Vector3();
+    const globalQuat = new THREE.Quaternion();
+    
+    for (let i = 0; i < physicsSync.length; i++) {
+      const p = physicsSync[i];
+      p.mesh.getWorldPosition(globalPos);
+      p.mesh.getWorldQuaternion(globalQuat);
+      
+      p.body.position.copy(globalPos);
+      p.body.quaternion.copy(globalQuat);
+    }
+    
+    // 3. Sinkronkan Objek Fisika -> Tampilan 3D (Kotak & Bola)
+    boxMesh.position.copy(boxBody.position);
+    boxMesh.quaternion.copy(boxBody.quaternion);
+
+    sphereMesh.position.copy(sphereBody.position);
+    sphereMesh.quaternion.copy(sphereBody.quaternion);
+
     renderer.render(scene, camera);
   }
   animate();
@@ -178,38 +236,9 @@ void loop() {
   });
 
   // ==========================================
-  // VIRTUAL PWM & C++ TRANSLATOR
+  // JS EDITOR RUNTIME
   // ==========================================
-  
-  // Mapping Channel PCA9685 ke nama sendi di URDF Anda
-  const jointMapping = {
-    0: 'Revolute 1',
-    1: 'Revolute 2',
-    2: 'Revolute 3'
-  };
-
-  // Konversi pulse (150-600) ke radian (0 s/d 180 derajat)
-  function pulseToRad(pulse) {
-    const pMin = 150, pMax = 600;
-    const radMin = 0, radMax = Math.PI; // 0 hingga 180 derajat
-    // Batasi nilai
-    pulse = Math.max(pMin, Math.min(pulse, pMax));
-    return radMin + (pulse - pMin) * (radMax - radMin) / (pMax - pMin);
-  }
-
-  // Objek PWM tiruan
-  const pwm = {
-    setPWM: function(channel, on, off) {
-      if(robot && jointMapping[channel] && robot.joints[jointMapping[channel]]) {
-        const rad = pulseToRad(off);
-        robot.joints[jointMapping[channel]].setJointValue(rad);
-      }
-    }
-  };
-
-  // Fungsi delay untuk loop asinkron
-  const _delay = ms => new Promise(res => setTimeout(res, ms));
-
+  const delay = ms => new Promise(res => setTimeout(res, ms));
   let _globalRunState = { isRunning: false, runId: 0 };
 
   function stopCode() {
@@ -217,11 +246,9 @@ void loop() {
     document.getElementById('runBtn').style.display = 'inline-block';
     document.getElementById('stopBtn').style.display = 'none';
   }
-
   document.getElementById('stopBtn').addEventListener('click', stopCode);
 
   async function runCode() {
-    // Reset status jalan sebelumnya
     _globalRunState.isRunning = false; 
     _globalRunState.runId++;
     const currentRunId = _globalRunState.runId;
@@ -231,48 +258,20 @@ void loop() {
     
     let rawCode = document.getElementById('code').value;
     
-    // --- TRANSLATOR C++ SEDERHANA KE JS ---
-    let jsCode = rawCode;
-    // Hapus constexpr
-    jsCode = jsCode.replace(/\bconstexpr\s+/g, '');
-    jsCode = jsCode.replace(/\bconst\s+/g, '');
-    
-    // Ubah tipe data
-    const types = ['int', 'float', 'double', 'bool', 'uint32_t', 'uint8_t', 'int16_t', 'unsigned long', 'long'];
-    types.forEach(t => {
-      const regex = new RegExp('\\b' + t + '\\s+', 'g');
-      jsCode = jsCode.replace(regex, 'let ');
-    });
-    
-    // Ubah delay menjadi await
-    jsCode = jsCode.replace(/\bdelay\s*\(/g, 'await _delay(');
-    
-    // Ubah void setup dan loop menjadi fungsi async
-    jsCode = jsCode.replace(/\bvoid\s+setup\s*\(/g, 'async function _setup(');
-    jsCode = jsCode.replace(/\bvoid\s+loop\s*\(/g, 'async function _loop(');
-    // Ubah sisa fungsi void menjadi function biasa
-    jsCode = jsCode.replace(/\bvoid\s+([a-zA-Z0-9_]+)\s*\(/g, 'function $1(');
-    
-    // Bungkus eksekutor
     const executorCode = `
       return (async function() {
         try {
-          ${jsCode}
-          
-          if (typeof _setup === 'function') {
-            await _setup();
-          }
+          ${rawCode}
           
           _runState.isRunning = true;
-          if (typeof _loop === 'function') {
+          if (typeof loop === 'function') {
             while (_runState.isRunning && currentRunId === _runState.runId) {
-              await _loop();
-              // Jeda kecil agar browser tidak hang jika loop kosong
-              await _delay(5); 
+              await loop();
+              await delay(5); 
             }
           }
         } catch (err) {
-          alert("Error pada logika kode Anda:\\n" + err.message);
+          alert("Error eksekusi JavaScript:\n" + err.message);
           console.error(err);
         } finally {
           if (currentRunId === _runState.runId) {
@@ -284,7 +283,6 @@ void loop() {
     `;
 
     try {
-      // API Joystick Virtual untuk C++
       const virtualJoystick = {
         connected: function() {
           const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -307,12 +305,11 @@ void loop() {
         }
       };
 
-      const millis = () => performance.now();
-
-      const runFunc = new Function('pwm', 'joystick', 'millis', '_delay', '_runState', 'currentRunId', executorCode);
-      await runFunc(pwm, virtualJoystick, millis, _delay, _globalRunState, currentRunId);
+      // Buat fungsi dengan argumen khusus
+      const runFunc = new Function('robot', 'joystick', 'delay', '_runState', 'currentRunId', executorCode);
+      await runFunc(robot, virtualJoystick, delay, _globalRunState, currentRunId);
     } catch (e) {
-      console.error("Transpiler Error:", e);
+      console.error("Executor Error:", e);
       alert("Error struktural kode: \n" + e.message);
       stopCode();
     }
@@ -321,89 +318,68 @@ void loop() {
   document.getElementById('runBtn').addEventListener('click', runCode);
 
   // ==========================================
-  // CODE TEMPLATES
+  // TEMPLATES
   // ==========================================
   const modeSelect = document.getElementById('modeSelect');
   const codeArea = document.getElementById('code');
   
-  const codeTemplateSweep = `void setup() {
-  // Uji Coba Semua Sendi (Termasuk Base)
-}
-
-void loop() {
-  // Kembali ke posisi tengah (Tegak lurus)
-  pwm.setPWM(0, 0, 375); 
-  pwm.setPWM(1, 0, 375); 
-  pwm.setPWM(2, 0, 375); 
-  delay(1000);
-
-  // 1. Menggerakkan Servo Base (Channel 0)
-  for(int p = 375; p <= 500; p += 2) {
-    pwm.setPWM(0, 0, p); delay(15);
+  const codeTemplateSweep = `// JavaScript murni: Animasi Menyapu
+async function loop() {
+  const baseJoint = robot.joints['Revolute 1'];
+  const pMin = 0;
+  const pMax = Math.PI;
+  
+  // Menyapu Kiri
+  for(let p = pMax/2; p <= pMax; p += 0.05) {
+    baseJoint.setJointValue(p);
+    await delay(15);
   }
-  for(int p = 500; p >= 250; p -= 2) {
-    pwm.setPWM(0, 0, p); delay(15);
+  // Menyapu Kanan
+  for(let p = pMax; p >= pMin; p -= 0.05) {
+    baseJoint.setJointValue(p);
+    await delay(15);
   }
-  for(int p = 250; p <= 375; p += 2) {
-    pwm.setPWM(0, 0, p); delay(15);
+  // Kembali ke tengah
+  for(let p = pMin; p <= pMax/2; p += 0.05) {
+    baseJoint.setJointValue(p);
+    await delay(15);
   }
-  delay(1000);
+  await delay(1000);
 }`;
 
-  const codeTemplateJoystick = `// Variabel global untuk menyimpan posisi servo saat ini
-float posBase = 375;
-float posBahu = 375;
-float posSiku = 375;
+  const codeTemplateJoystick = `// Gunakan Joystick Anda untuk Mendorong Benda Fisika!
+let posBase = Math.PI / 2;
+let posBahu = Math.PI / 2;
+let posSiku = Math.PI / 2;
 
-void setup() {
-  // Pastikan joystick/gamepad sudah terhubung dan
-  // Anda telah menekan salah satu tombolnya!
-}
-
-void loop() {
+async function loop() {
   if (joystick.connected()) {
-    // Ambil nilai pergerakan analog (dari -1.0 sampai 1.0)
-    float analogKiriX = joystick.getAxis(0); // Kiri/Kanan
-    float analogKiriY = joystick.getAxis(1); // Atas/Bawah
-    float analogKananY = joystick.getAxis(3); // Atas/Bawah Siku
-
-    float deadzone = 0.1; // Abaikan sentuhan halus (drift)
-    float speed = 2.5;
-
-    // Gerakkan Base
-    if (analogKiriX > deadzone || analogKiriX < -deadzone) {
-      posBase += analogKiriX * speed;
-    }
+    let axisX = joystick.getAxis(0);
+    let axisY = joystick.getAxis(1);
+    let axisSiku = joystick.getAxis(3);
     
-    // Gerakkan Bahu
-    if (analogKiriY > deadzone || analogKiriY < -deadzone) {
-      posBahu += analogKiriY * speed;
-    }
+    let deadzone = 0.1;
+    let speed = 0.05; // radian per frame
     
-    // Gerakkan Siku
-    if (analogKananY > deadzone || analogKananY < -deadzone) {
-      posSiku += analogKananY * speed;
-    }
-
-    // Batasi nilai agar tidak merusak servo (150 s/d 600)
-    posBase = max(150, min(posBase, 600));
-    posBahu = max(150, min(posBahu, 600));
-    posSiku = max(150, min(posSiku, 600));
-
-    // Kirim sinyal PWM
-    pwm.setPWM(0, 0, posBase);
-    pwm.setPWM(1, 0, posBahu);
-    pwm.setPWM(2, 0, posSiku);
+    if (Math.abs(axisX) > deadzone) posBase += axisX * speed;
+    if (Math.abs(axisY) > deadzone) posBahu += axisY * speed;
+    if (Math.abs(axisSiku) > deadzone) posSiku += axisSiku * speed;
     
-    delay(20); // Jeda singkat agar tidak terlalu cepat
-  } else {
-    // Tunggu koneksi
-    delay(500);
+    // Batasi sudut (0 - 180 derajat)
+    posBase = Math.max(0, Math.min(Math.PI, posBase));
+    posBahu = Math.max(0, Math.min(Math.PI, posBahu));
+    posSiku = Math.max(0, Math.min(Math.PI, posSiku));
+    
+    robot.joints['Revolute 1'].setJointValue(posBase);
+    robot.joints['Revolute 2'].setJointValue(posBahu);
+    robot.joints['Revolute 3'].setJointValue(posSiku);
+    
+    await delay(20);
   }
 }`;
 
   modeSelect.addEventListener('change', (e) => {
-    stopCode(); // Hentikan kode lama
+    stopCode();
     if(e.target.value === 'joystick') {
       codeArea.value = codeTemplateJoystick;
     } else {
@@ -411,15 +387,6 @@ void loop() {
     }
   });
 
-  // Polyfill untuk fungsi bawaan Arduino/C++
-  window.max = Math.max;
-  window.min = Math.min;
-  window.constrain = function(amt, low, high) {
-    return (amt < low) ? low : ((amt > high) ? high : amt);
-  };
-  window.map = function(x, in_min, in_max, out_min, out_max) {
-    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
-  };
 </script>
 </body>
 </html>
