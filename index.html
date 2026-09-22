@@ -233,10 +233,16 @@ void loop() {
     
     // --- TRANSLATOR C++ SEDERHANA KE JS ---
     let jsCode = rawCode;
+    // Hapus constexpr
+    jsCode = jsCode.replace(/\bconstexpr\s+/g, '');
+    jsCode = jsCode.replace(/\bconst\s+/g, '');
+    
     // Ubah tipe data
-    jsCode = jsCode.replace(/\bint\s+/g, 'let ');
-    jsCode = jsCode.replace(/\bfloat\s+/g, 'let ');
-    jsCode = jsCode.replace(/\bdouble\s+/g, 'let ');
+    const types = ['int', 'float', 'double', 'bool', 'uint32_t', 'uint8_t', 'int16_t', 'unsigned long', 'long'];
+    types.forEach(t => {
+      const regex = new RegExp('\\b' + t + '\\s+', 'g');
+      jsCode = jsCode.replace(regex, 'let ');
+    });
     
     // Ubah delay menjadi await
     jsCode = jsCode.replace(/\bdelay\s*\(/g, 'await _delay(');
@@ -244,6 +250,8 @@ void loop() {
     // Ubah void setup dan loop menjadi fungsi async
     jsCode = jsCode.replace(/\bvoid\s+setup\s*\(/g, 'async function _setup(');
     jsCode = jsCode.replace(/\bvoid\s+loop\s*\(/g, 'async function _loop(');
+    // Ubah sisa fungsi void menjadi function biasa
+    jsCode = jsCode.replace(/\bvoid\s+([a-zA-Z0-9_]+)\s*\(/g, 'function $1(');
     
     // Bungkus eksekutor
     const executorCode = `
@@ -289,11 +297,20 @@ void loop() {
             if(pads[i] && pads[i].axes.length > index) return pads[i].axes[index];
           }
           return 0.0;
+        },
+        getButton: function(index) {
+          const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for(let i=0; i<pads.length; i++) {
+            if(pads[i] && pads[i].buttons.length > index) return pads[i].buttons[index].pressed;
+          }
+          return false;
         }
       };
 
-      const runFunc = new Function('pwm', 'joystick', '_delay', '_runState', 'currentRunId', executorCode);
-      await runFunc(pwm, virtualJoystick, _delay, _globalRunState, currentRunId);
+      const millis = () => performance.now();
+
+      const runFunc = new Function('pwm', 'joystick', 'millis', '_delay', '_runState', 'currentRunId', executorCode);
+      await runFunc(pwm, virtualJoystick, millis, _delay, _globalRunState, currentRunId);
     } catch (e) {
       console.error("Transpiler Error:", e);
       alert("Error struktural kode: \n" + e.message);
@@ -394,9 +411,15 @@ void loop() {
     }
   });
 
-  // Polyfill untuk max/min di JS (karena user pakai max/min dari C++)
+  // Polyfill untuk fungsi bawaan Arduino/C++
   window.max = Math.max;
   window.min = Math.min;
+  window.constrain = function(amt, low, high) {
+    return (amt < low) ? low : ((amt > high) ? high : amt);
+  };
+  window.map = function(x, in_min, in_max, out_min, out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+  };
 </script>
 </body>
 </html>
